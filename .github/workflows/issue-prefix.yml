@@ -1,0 +1,38 @@
+# Setzt die Issue-Kennung an den Anfang jedes Issue-Titels: "[ACF-52] Titel" für Issue #52.
+# Das Präfix kommt aus der Repo-Variable ISSUE_PREFIX (2–3 Großbuchstaben, Register: .factory/issue-prefixes.conf der Factory).
+# Wer ein Issue anlegt, schreibt nur den Titel (oder "[ACF] Titel"), die Nummer ergänzt diese Action.
+# Läuft nur, wenn der Titel noch nicht stimmt (die Bedingung prüft das, bevor ein Runner startet, kostet also keine Minuten).
+# Die Umbenennung mit dem eingebauten Token löst keine weiteren Workflows aus, es gibt also keine Schleife.
+name: Issue-Präfix
+
+on:
+  issues:
+    types: [opened, edited, reopened]
+
+permissions:
+  issues: write
+
+jobs:
+  prefix:
+    if: >-
+      vars.ISSUE_PREFIX != '' &&
+      !startsWith(github.event.issue.title, format('[{0}-{1}] ', vars.ISSUE_PREFIX, github.event.issue.number))
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Titel mit Kennung versehen
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PFX: ${{ vars.ISSUE_PREFIX }}
+          N: ${{ github.event.issue.number }}
+          TITLE: ${{ github.event.issue.title }}
+        run: |
+          set -euo pipefail
+          [[ "$PFX" =~ ^[A-Z]{2,3}$ ]] || { echo "::error::ISSUE_PREFIX '$PFX' ungültig (2–3 Großbuchstaben)"; exit 1; }
+          # Vorhandene Kennung "[XY-12]" (zum Beispiel nach dem Verschieben aus einem anderen Repo) oder Platzhalter "[$PFX]" entfernen
+          t="$(sed -E "s/^[[:space:]]*\[[A-Z]{2,3}-[0-9]+\][[:space:]]*//; s/^[[:space:]]*\[$PFX\][[:space:]]*//" <<<"$TITLE")"
+          new="[$PFX-$N] $t"
+          [ "$new" = "$TITLE" ] && exit 0
+          gh api -X PATCH "repos/$REPO/issues/$N" -f title="$new" >/dev/null
+          echo "#$N: $new"
